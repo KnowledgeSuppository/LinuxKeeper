@@ -1,7 +1,4 @@
 <div align="center">
-<<<<<<< HEAD
-  <img src="assets/lkBanner.png" />
-=======
   <img src="assets/lKBanner.svg" />
 
   <p>
@@ -13,7 +10,6 @@
   </p>
 
   <p><em>iTechniqs — "From code, to Core"</em></p>
->>>>>>> 673d510 (docs: v3.0.0 README — banner, badges, boot sequence)
 </div>
 
 ---
@@ -25,13 +21,13 @@
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/LinuxKeeper/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KnowledgeSuppository/LinuxKeeper/main/setup.sh | bash
 ```
 
 Or clone and run locally:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/LinuxKeeper.git
+git clone https://github.com/KnowledgeSuppository/LinuxKeeper.git
 cd LinuxKeeper
 bash setup.sh
 ```

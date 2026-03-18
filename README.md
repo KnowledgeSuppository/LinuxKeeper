@@ -1,7 +1,8 @@
 <div align="center">
-  <img src="conky/GithubBanner.png" />
+  <img src="conky/lkBanner.png" />
 </div>
-
+![Build](https://img.shields.io/badge/build-passing-2ab32a)
+![Version](https://img.shields.io/badge/v0.1.0-blue?logo=discord)
 
 # LinuxKeeper
 ### Ubuntu/Debian Linux Setup & Maintenance Toolkit

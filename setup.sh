@@ -35,6 +35,28 @@ TOOLBOX_DIR="$HOME/.local/share/JetBrains/Toolbox"
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
+# ─── Whiptail theme ───────────────────────────────────────────────────────────
+# Applied via NEWT_COLORS — .newtrc is unreliable across Ubuntu builds.
+# Uses #3b4261 background (Tokyo Night sidebar colour, matches logo family).
+# Hex support requires libnewt >= 0.52.21 (Ubuntu 22.04+).
+apply_whiptail_theme() {
+    # Remove any leftover .newtrc — it overrides NEWT_COLORS and was unreliable
+    rm -f "$HOME/.newtrc"
+
+    local newt_patch
+    newt_patch=$(dpkg-query -W -f='${Version}' libnewt0.52 2>/dev/null \
+        | grep -oP '(?<=0\.52\.)\d+' | head -1)
+    newt_patch="${newt_patch:-0}"
+
+    if (( newt_patch >= 21 )); then
+        export NEWT_COLORS="root=white,#1a1b26:window=white,#1a1b26:shadow=black,black:title=#2ab32a,#1a1b26:checkbox=white,#1a1b26:button=black,#2ab32a:actbutton=white,#1a1b26:compactbutton=white,#1a1b26:listbox=white,#1a1b26:actlistbox=black,#2ab32a:sellistbox=black,#2ab32a:actsellistbox=black,#2ab32a:entry=white,#1a1b26:disentry=white,#1a1b26:label=white,#1a1b26"
+    else
+        export NEWT_COLORS="root=white,black:window=white,black:shadow=black,black:title=green,black:checkbox=white,black:button=black,green:actbutton=white,black:compactbutton=white,black:listbox=white,black:actlistbox=black,green:sellistbox=black,green:actsellistbox=black,green:entry=white,black:disentry=white,black:label=white,black"
+    fi
+}
+
+
+
 # ─── Globals ─────────────────────────────────────────────────────────────────
 LOG_FILE="/var/log/itechniqs-setup.log"
 DOTFILES_DIR="$HOME/.itechniqs/dotfiles"
@@ -90,6 +112,10 @@ _ver_tag_service() {
         echo "[installed: $ver, stopped]"
     fi
 }
+
+# Helper: returns OFF if tool is installed (default skip), ON if absent (default install)
+# Usage: $(_chk $inst_bool)
+_chk() { $1 && echo "OFF" || echo "ON"; }
 
 # ── Per-tool version detectors ────────────────────────────────────────────────
 
@@ -232,14 +258,34 @@ ver_appimage_tools() {
     fi
 }
 
+# Generic: check if a snap package is installed, return version
+_snap_ver() {
+    local pkg="$1"
+    snap list "$pkg" 2>/dev/null | awk 'NR==2{print $2}' || echo ""
+}
+
+# Generic: check flatpak by app ID, return version
+_flatpak_ver() {
+    local app_id="$1"
+    flatpak info "$app_id" 2>/dev/null | awk -F': ' '/^Version/{print $2}' || echo ""
+}
+
 # ── Module 7: Creative tools ──────────────────────────────────────────────────
 
 ver_gimp() {
-    local v; v=$(_dpkg_ver gimp); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver gimp)
+    [[ -z "$v" ]] && v=$(_snap_ver gimp)
+    [[ -z "$v" ]] && v=$(_flatpak_ver org.gimp.GIMP)
+    _ver_tag "$v"
 }
 
 ver_inkscape() {
-    local v; v=$(_cmd_ver inkscape --version); _ver_tag "$v"
+    local v
+    v=$(_cmd_ver inkscape --version)
+    [[ -z "$v" ]] && v=$(_snap_ver inkscape)
+    [[ -z "$v" ]] && v=$(_flatpak_ver org.inkscape.Inkscape)
+    _ver_tag "$v"
 }
 
 ver_ffmpeg() {
@@ -247,23 +293,37 @@ ver_ffmpeg() {
 }
 
 ver_kicad() {
-    local v; v=$(_dpkg_ver kicad); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver kicad)
+    [[ -z "$v" ]] && v=$(_snap_ver kicad)
+    [[ -z "$v" ]] && v=$(_flatpak_ver org.kicad.KiCad)
+    # Last resort: kicad binary on PATH (covers edge cases like manual install)
+    [[ -z "$v" ]] && command -v kicad &>/dev/null && v="installed (unknown source)"
+    _ver_tag "$v"
 }
 
 ver_arduino() {
     local v=""
     [[ -f "$APPIMAGE_DIR/Arduino-IDE.AppImage" ]] && v="AppImage present"
+    [[ -z "$v" ]] && v=$(_snap_ver arduino)
+    [[ -z "$v" ]] && v=$(_snap_ver arduino-mhall119)
     _ver_tag "$v"
 }
 
 ver_frog() {
-    local v=""
-    flatpak list --app 2>/dev/null | grep -q "com.github.tenderowl.frog" && v="installed (Flatpak)"
+    local v
+    v=$(_dpkg_ver frog)
+    [[ -z "$v" ]] && v=$(_snap_ver frog)
+    [[ -z "$v" ]] && v=$(_flatpak_ver com.github.tenderowl.frog)
     _ver_tag "$v"
 }
 
 ver_conky() {
-    local v; v=$(_dpkg_ver conky-all); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver conky-all)
+    [[ -z "$v" ]] && v=$(_dpkg_ver conky)
+    [[ -z "$v" ]] && v=$(_snap_ver conky)
+    _ver_tag "$v"
 }
 
 ver_gufw() {
@@ -273,7 +333,10 @@ ver_gufw() {
 # ── Module 8: Security/network tools ─────────────────────────────────────────
 
 ver_wireshark() {
-    local v; v=$(_dpkg_ver wireshark); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver wireshark)
+    [[ -z "$v" ]] && v=$(_snap_ver wireshark)
+    _ver_tag "$v"
 }
 
 ver_aircrack() {
@@ -281,7 +344,10 @@ ver_aircrack() {
 }
 
 ver_gparted() {
-    local v; v=$(_dpkg_ver gparted); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver gparted)
+    [[ -z "$v" ]] && v=$(_snap_ver gparted)
+    _ver_tag "$v"
 }
 
 ver_nmap() {
@@ -299,16 +365,24 @@ ver_restricted_extras() {
 }
 
 ver_vlc() {
-    local v; v=$(_dpkg_ver vlc); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver vlc)
+    [[ -z "$v" ]] && v=$(_snap_ver vlc)
+    [[ -z "$v" ]] && v=$(_flatpak_ver org.videolan.VLC)
+    _ver_tag "$v"
 }
 
 ver_kodi() {
-    local v; v=$(_dpkg_ver kodi); _ver_tag "$v"
+    local v
+    v=$(_dpkg_ver kodi)
+    [[ -z "$v" ]] && v=$(_snap_ver kodi)
+    _ver_tag "$v"
 }
 
 ver_stremio() {
     local v=""
     [[ -f "$APPIMAGE_DIR/Stremio.AppImage" ]] && v="AppImage present"
+    [[ -z "$v" ]] && v=$(_flatpak_ver com.stremio.Stremio)
     _ver_tag "$v"
 }
 
@@ -1050,15 +1124,51 @@ SSHEOF
 install_dev_tools() {
     hdr "Developer Tools"
 
-    # Phase 3: build version-aware labels before showing the checklist
-    local _sdk  _jdk17 _jdk21 _kotlin _gradle _android _toolbox
+    # ── Phase 3: detect installed state and build smart checklist ────────────────
+    # Each tool is in one of three states:
+    #   ABSENT   → shown ON  (not installed — offer to install)
+    #   PRESENT  → shown OFF (already installed — don't re-run install by default)
+    #   TOOLBOX  → shown OFF always (self-updating, script cannot upgrade it)
+    #
+    # After the user confirms their selection, any items that were already
+    # installed and are still ticked get routed to their upgrade function instead
+    # of the install function. The user is warned before any upgrades run.
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    # Detect installed state for each tool (true = already installed)
+    local inst_sdk=false  inst_jdk17=false inst_jdk21=false inst_kotlin=false
+    local inst_gradle=false inst_android=false inst_toolbox=false inst_docker=false
+    local inst_python=false inst_nodejs=false inst_gemini=false inst_qwen=false
+    local inst_dbeaver=false inst_postman=false inst_pg=false inst_chrome=false
+    local inst_appimg=false
+
+    [[ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]]                                  && inst_sdk=true
+    [[ -n "$(ls "$HOME/.sdkman/candidates/java/" 2>/dev/null | grep '^17\.')" ]] && inst_jdk17=true
+    [[ -n "$(ls "$HOME/.sdkman/candidates/java/" 2>/dev/null | grep '^21\.')" ]] && inst_jdk21=true
+    [[ -d "$HOME/.sdkman/candidates/kotlin/current" ]]                           && inst_kotlin=true
+    [[ -d "$HOME/.sdkman/candidates/gradle/current" ]]                           && inst_gradle=true
+    [[ -d "${ANDROID_HOME:-$HOME/Android/Sdk}/cmdline-tools/latest" ]]           && inst_android=true
+    [[ -f "$HOME/.local/share/JetBrains/Toolbox/bin/jetbrains-toolbox" ]]        && inst_toolbox=true
+    cmd_exists docker                                                              && inst_docker=true
+    cmd_exists python3                                                             && inst_python=true
+    cmd_exists node                                                                && inst_nodejs=true
+    { cmd_exists gemini || npm list -g @google/gemini-cli &>/dev/null; }          && inst_gemini=true
+    pip3 show qwen-agent &>/dev/null 2>&1                                         && inst_qwen=true
+    is_installed dbeaver-ce                                                       && inst_dbeaver=true
+    flatpak list --app 2>/dev/null | grep -q "com.getpostman.Postman"             && inst_postman=true
+    cmd_exists psql                                                                && inst_pg=true
+    is_installed google-chrome-stable                                             && inst_chrome=true
+    { is_installed aria2 && is_installed libfuse2; }                              && inst_appimg=true
+
+    # Build version labels
+    local _sdk _jdk17 _jdk21 _kotlin _gradle _android _toolbox
     local _docker _python _nodejs _gemini _qwen _dbeaver _postman
     local _pg _chrome _appimg
-    _sdk=$( ver_sdkman)
-    _jdk17=$(ver_jdk 17)
-    _jdk21=$(ver_jdk 21)
-    _kotlin=$(ver_kotlin)
-    _gradle=$(ver_gradle)
+    _sdk=$(    ver_sdkman)
+    _jdk17=$(  ver_jdk 17)
+    _jdk21=$(  ver_jdk 21)
+    _kotlin=$( ver_kotlin)
+    _gradle=$( ver_gradle)
     _android=$(ver_android_sdk)
     _toolbox=$(ver_toolbox)
     _docker=$( ver_docker)
@@ -1072,49 +1182,125 @@ install_dev_tools() {
     _chrome=$( ver_chrome)
     _appimg=$( ver_appimage_tools)
 
+    # Helper: installed tools default OFF; absent tools default ON
+    # JetBrains Toolbox always OFF when installed (self-managing)
+    local toolbox_default; $inst_toolbox && toolbox_default="OFF" || toolbox_default="ON"
+    local toolbox_suffix; $inst_toolbox \
+        && toolbox_suffix="$_toolbox — self-updating, no script upgrade" \
+        || toolbox_suffix="$_toolbox"
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select developer tools to install:" 28 72 18 \
-        "SDKMAN"         "SDKMAN — version manager              $_sdk"     ON  \
-        "JDK17"          "OpenJDK 17 LTS (via SDKMAN)           $_jdk17"   ON  \
-        "JDK21"          "OpenJDK 21 LTS (via SDKMAN)           $_jdk21"   OFF \
-        "KOTLIN"         "Kotlin compiler (via SDKMAN)          $_kotlin"  ON  \
-        "GRADLE"         "Gradle build tool (via SDKMAN)        $_gradle"  ON  \
-        "ANDROID_SDK"    "Android command-line tools            $_android" ON  \
-        "TOOLBOX"        "JetBrains Toolbox (IDEs manager)      $_toolbox" ON  \
-        "DOCKER"         "Docker Engine + Compose plugin        $_docker"  ON  \
-        "PYTHON"         "Python 3 + pip + venv + pipx          $_python"  ON  \
-        "NODEJS"         "Node.js LTS (via NodeSource)          $_nodejs"  ON  \
-        "GEMINI_CLI"     "Gemini CLI (npm)                      $_gemini"  ON  \
-        "QWEN_CLI"       "Qwen CLI (pip)                        $_qwen"    ON  \
-        "DBEAVER"        "DBeaver CE (PostgreSQL GUI, .deb)     $_dbeaver" ON  \
-        "POSTMAN"        "Postman (Flatpak)                     $_postman" ON  \
-        "PG_CLIENT"      "PostgreSQL client (psql)              $_pg"      ON  \
-        "CHROME"         "Google Chrome (.deb, official repo)   $_chrome"  ON  \
-        "APPIMAGE_TOOLS" "AppImage tools + aria2 downloader     $_appimg"  ON  \
+        "Developer tools — installed items are OFF by default.\nTick to install or upgrade." \
+        30 76 18 \
+        "SDKMAN"         "SDKMAN — version manager              $_sdk"          $(_chk $inst_sdk)     \
+        "JDK17"          "OpenJDK 17 LTS (via SDKMAN)           $_jdk17"        $(_chk $inst_jdk17)   \
+        "JDK21"          "OpenJDK 21 LTS (via SDKMAN)           $_jdk21"        $(_chk $inst_jdk21)   \
+        "KOTLIN"         "Kotlin compiler (via SDKMAN)          $_kotlin"       $(_chk $inst_kotlin)  \
+        "GRADLE"         "Gradle build tool (via SDKMAN)        $_gradle"       $(_chk $inst_gradle)  \
+        "ANDROID_SDK"    "Android command-line tools            $_android"      $(_chk $inst_android) \
+        "TOOLBOX"        "JetBrains Toolbox                     $toolbox_suffix" "$toolbox_default"   \
+        "DOCKER"         "Docker Engine + Compose plugin        $_docker"       $(_chk $inst_docker)  \
+        "PYTHON"         "Python 3 + pip + venv + pipx          $_python"       $(_chk $inst_python)  \
+        "NODEJS"         "Node.js LTS (via NodeSource)          $_nodejs"       $(_chk $inst_nodejs)  \
+        "GEMINI_CLI"     "Gemini CLI (npm)                      $_gemini"       $(_chk $inst_gemini)  \
+        "QWEN_CLI"       "Qwen CLI (pip)                        $_qwen"         $(_chk $inst_qwen)    \
+        "DBEAVER"        "DBeaver CE (PostgreSQL GUI, .deb)     $_dbeaver"      $(_chk $inst_dbeaver) \
+        "POSTMAN"        "Postman (Flatpak)                     $_postman"      $(_chk $inst_postman) \
+        "PG_CLIENT"      "PostgreSQL client (psql)              $_pg"           $(_chk $inst_pg)      \
+        "CHROME"         "Google Chrome (.deb, official repo)   $_chrome"       $(_chk $inst_chrome)  \
+        "APPIMAGE_TOOLS" "AppImage tools + aria2 downloader     $_appimg"       $(_chk $inst_appimg)  \
         3>&1 1>&2 2>&3) || return
 
+    # ── Separate selections into INSTALL vs UPGRADE lists ─────────────────────
+    local to_install=() to_upgrade=()
+    _classify() {
+        local key="$1" inst_var="$2"
+        [[ "$CHOICES" == *"$key"* ]] || return
+        if $inst_var; then
+            to_upgrade+=("$key")
+        else
+            to_install+=("$key")
+        fi
+    }
+    _classify "SDKMAN"         $inst_sdk
+    _classify "JDK17"          $inst_jdk17
+    _classify "JDK21"          $inst_jdk21
+    _classify "KOTLIN"         $inst_kotlin
+    _classify "GRADLE"         $inst_gradle
+    _classify "ANDROID_SDK"    $inst_android
+    _classify "TOOLBOX"        $inst_toolbox
+    _classify "DOCKER"         $inst_docker
+    _classify "PYTHON"         $inst_python
+    _classify "NODEJS"         $inst_nodejs
+    _classify "GEMINI_CLI"     $inst_gemini
+    _classify "QWEN_CLI"       $inst_qwen
+    _classify "DBEAVER"        $inst_dbeaver
+    _classify "POSTMAN"        $inst_postman
+    _classify "PG_CLIENT"      $inst_pg
+    _classify "CHROME"         $inst_chrome
+    _classify "APPIMAGE_TOOLS" $inst_appimg
+
+    # ── Warn before running any upgrades ──────────────────────────────────────
+    if (( ${#to_upgrade[@]} > 0 )); then
+        local upgrade_list
+        upgrade_list=$(printf '  • %s\n' "${to_upgrade[@]}")
+        whiptail --yesno \
+            "The following tools are already installed and will be UPGRADED:\n\n$upgrade_list\n\nProceed with upgrades?" \
+            20 60 --title "Confirm Upgrades" --yes-button "Upgrade" --no-button "Skip upgrades" \
+            3>&1 1>&2 2>&3 || to_upgrade=()
+    fi
+
+    # ── Run installs ───────────────────────────────────────────────────────────
     apt_update
 
-    [[ "$CHOICES" == *"SDKMAN"*      ]] && install_sdkman
-    [[ "$CHOICES" == *"JDK17"*       ]] && sdkman_install java 17-open
-    [[ "$CHOICES" == *"JDK21"*       ]] && sdkman_install java 21-open
-    [[ "$CHOICES" == *"KOTLIN"*      ]] && sdkman_install kotlin
-    [[ "$CHOICES" == *"GRADLE"*      ]] && sdkman_install gradle
-    [[ "$CHOICES" == *"ANDROID_SDK"* ]] && install_android_sdk
-    [[ "$CHOICES" == *"TOOLBOX"*     ]] && install_jetbrains_toolbox
-    [[ "$CHOICES" == *"DOCKER"*      ]] && install_docker
-    [[ "$CHOICES" == *"PYTHON"*      ]] && install_python
-    [[ "$CHOICES" == *"NODEJS"*      ]] && install_nodejs
-    [[ "$CHOICES" == *"GEMINI_CLI"*  ]] && install_gemini_cli
-    [[ "$CHOICES" == *"QWEN_CLI"*    ]] && install_qwen_cli
-    [[ "$CHOICES" == *"DBEAVER"*     ]] && install_dbeaver
-    [[ "$CHOICES" == *"POSTMAN"*     ]] && flatpak_install "com.getpostman.Postman"
-    [[ "$CHOICES" == *"PG_CLIENT"*   ]] && apt_install postgresql-client
-    [[ "$CHOICES" == *"CHROME"*      ]] && install_chrome
-    [[ "$CHOICES" == *"APPIMAGE_TOOLS"* ]] && apt_install aria2 libfuse2
+    local key
+    for key in "${to_install[@]}"; do
+        case "$key" in
+            SDKMAN)         install_sdkman ;;
+            JDK17)          sdkman_install java 17-open ;;
+            JDK21)          sdkman_install java 21-open ;;
+            KOTLIN)         sdkman_install kotlin ;;
+            GRADLE)         sdkman_install gradle ;;
+            ANDROID_SDK)    install_android_sdk ;;
+            TOOLBOX)        install_jetbrains_toolbox ;;
+            DOCKER)         install_docker ;;
+            PYTHON)         install_python ;;
+            NODEJS)         install_nodejs ;;
+            GEMINI_CLI)     install_gemini_cli ;;
+            QWEN_CLI)       install_qwen_cli ;;
+            DBEAVER)        install_dbeaver ;;
+            POSTMAN)        flatpak_install "com.getpostman.Postman" ;;
+            PG_CLIENT)      apt_install postgresql-client ;;
+            CHROME)         install_chrome ;;
+            APPIMAGE_TOOLS) apt_install aria2 libfuse2 ;;
+        esac
+    done
 
-    ok "Developer tools installation complete."
+    # ── Run upgrades ───────────────────────────────────────────────────────────
+    for key in "${to_upgrade[@]}"; do
+        case "$key" in
+            SDKMAN)         upgrade_sdkman ;;
+            JDK17)          upgrade_sdkman_tool java 17-open ;;
+            JDK21)          upgrade_sdkman_tool java 21-open ;;
+            KOTLIN)         upgrade_sdkman_tool kotlin ;;
+            GRADLE)         upgrade_sdkman_tool gradle ;;
+            ANDROID_SDK)    upgrade_android_sdk ;;
+            TOOLBOX)        warn "JetBrains Toolbox self-updates — open it to check for updates." ;;
+            DOCKER)         upgrade_apt_pkg docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+            PYTHON)         upgrade_apt_pkg python3 python3-pip python3-venv python3-dev ;;
+            NODEJS)         upgrade_nodejs ;;
+            GEMINI_CLI)     upgrade_gemini_cli ;;
+            QWEN_CLI)       upgrade_qwen_cli ;;
+            DBEAVER)        upgrade_apt_pkg dbeaver-ce ;;
+            POSTMAN)        flatpak update -y com.getpostman.Postman >> "$LOG_FILE" 2>&1 && ok "Postman updated." ;;
+            PG_CLIENT)      upgrade_apt_pkg postgresql-client ;;
+            CHROME)         upgrade_apt_pkg google-chrome-stable ;;
+            APPIMAGE_TOOLS) upgrade_apt_pkg aria2 libfuse2 ;;
+        esac
+    done
+
+    ok "Developer tools complete."
 }
 
 install_sdkman() {
@@ -1309,12 +1495,108 @@ install_chrome() {
 }
 
 # =============================================================================
-#  MODULE 7 — CREATIVE & ENGINEERING TOOLS
+#  MODULE 6 — UPGRADE FUNCTIONS
+#  Called when a tool is already installed and the user ticks it in the
+#  checklist. Each function upgrades without re-running the full install.
 # =============================================================================
+
+# Generic apt upgrade — pass one or more package names
+upgrade_apt_pkg() {
+    log "Upgrading: $*"
+    sudo apt-get install -y --only-upgrade "$@" >> "$LOG_FILE" 2>&1 \
+        && ok "Upgraded: $*" \
+        || warn "Upgrade failed for: $* — check $LOG_FILE"
+}
+
+upgrade_sdkman() {
+    log "Upgrading SDKMAN itself…"
+    export SDKMAN_DIR="$HOME/.sdkman"
+    set +u
+    [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh" || true
+    set -u
+    sdk selfupdate force >> "$LOG_FILE" 2>&1 \
+        && ok "SDKMAN updated." \
+        || warn "SDKMAN selfupdate failed — check $LOG_FILE"
+}
+
+upgrade_sdkman_tool() {
+    local tool="$1" version="${2:-}"
+    export SDKMAN_DIR="$HOME/.sdkman"
+    set +u
+    if [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]]; then
+        source "$HOME/.sdkman/bin/sdkman-init.sh" 2>/dev/null || true
+    else
+        set -u
+        warn "SDKMAN not available — cannot upgrade $tool"
+        return
+    fi
+    set -u
+    log "SDKMAN: upgrading $tool…"
+    # sdk upgrade installs the latest candidate and sets it as default
+    sdk upgrade "$tool" </dev/null >> "$LOG_FILE" 2>&1 \
+        && ok "SDKMAN: $tool upgraded." \
+        || warn "SDKMAN: $tool upgrade failed — may already be current. Check: sdk list $tool"
+}
+
+upgrade_android_sdk() {
+    local sdk_dir="${ANDROID_HOME:-$HOME/Android/Sdk}"
+    local sdkmgr="$sdk_dir/cmdline-tools/latest/bin/sdkmanager"
+    if [[ ! -f "$sdkmgr" ]]; then
+        warn "sdkmanager not found at $sdkmgr — cannot upgrade."
+        return
+    fi
+    log "Upgrading Android SDK components…"
+    "$sdkmgr" --update >> "$LOG_FILE" 2>&1 \
+        && ok "Android SDK components updated." \
+        || warn "Android SDK update failed — check $LOG_FILE"
+}
+
+upgrade_nodejs() {
+    log "Upgrading Node.js LTS via NodeSource…"
+    # Re-run NodeSource setup script — it updates the repo to current LTS channel
+    # then apt upgrades the package
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - >> "$LOG_FILE" 2>&1
+    upgrade_apt_pkg nodejs
+    ok "Node.js upgraded to $(node --version 2>/dev/null)"
+}
+
+upgrade_gemini_cli() {
+    log "Upgrading Gemini CLI…"
+    npm update -g @google/gemini-cli >> "$LOG_FILE" 2>&1 \
+        && ok "Gemini CLI upgraded." \
+        || warn "Gemini CLI upgrade failed — check npm output."
+}
+
+upgrade_qwen_cli() {
+    log "Upgrading Qwen CLI…"
+    pip3 install --user --upgrade qwen-agent >> "$LOG_FILE" 2>&1 \
+        && ok "Qwen CLI upgraded." \
+        || warn "Qwen CLI upgrade failed — check pip output."
+}
+
+
 install_creative_tools() {
     hdr "Creative & Engineering Tools"
 
-    # Phase 3: build version-aware labels
+    # Phase 3: detect installed state + build version labels
+    local inst_gimp=false inst_inkscape=false inst_ffmpeg=false inst_kicad=false
+    local inst_arduino=false inst_frog=false inst_conky=false inst_gufw=false
+
+    { is_installed gimp || snap list gimp &>/dev/null 2>&1 \
+        || flatpak info org.gimp.GIMP &>/dev/null 2>&1; }                        && inst_gimp=true
+    command -v inkscape &>/dev/null                                               && inst_inkscape=true
+    command -v ffmpeg &>/dev/null                                                 && inst_ffmpeg=true
+    { is_installed kicad || snap list kicad &>/dev/null 2>&1 \
+        || flatpak info org.kicad.KiCad &>/dev/null 2>&1 \
+        || command -v kicad &>/dev/null; }                                        && inst_kicad=true
+    { [[ -f "$APPIMAGE_DIR/Arduino-IDE.AppImage" ]] \
+        || snap list arduino &>/dev/null 2>&1; }                                  && inst_arduino=true
+    { is_installed frog || snap list frog &>/dev/null 2>&1 \
+        || flatpak info com.github.tenderowl.frog &>/dev/null 2>&1; }             && inst_frog=true
+    { is_installed conky-all || is_installed conky \
+        || snap list conky &>/dev/null 2>&1; }                                    && inst_conky=true
+    is_installed gufw                                                             && inst_gufw=true
+
     local _gimp _inkscape _ffmpeg _kicad _arduino _frog _conky _gufw
     _gimp=$(    ver_gimp)
     _inkscape=$(ver_inkscape)
@@ -1327,15 +1609,15 @@ install_creative_tools() {
 
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select creative/engineering tools:" 24 72 8 \
-        "GIMP"       "GIMP — image editor (apt)                $_gimp"     ON  \
-        "INKSCAPE"   "Inkscape — vector graphics (PPA)         $_inkscape" ON  \
-        "FFMPEG"     "FFmpeg — video/audio processing (apt)    $_ffmpeg"   ON  \
-        "KICAD"      "KiCad — PCB/electronics design (PPA)     $_kicad"   ON  \
-        "ARDUINO"    "Arduino IDE — serial-safe AppImage       $_arduino"  ON  \
-        "FROG"       "Frog OCR — text from images (Flatpak)    $_frog"     ON  \
-        "CONKY"      "Conky — desktop system monitor (apt)     $_conky"    ON  \
-        "GUFW"       "gufw — firewall GUI (apt)                $_gufw"     ON  \
+        "Creative/engineering tools — installed items are OFF by default." 24 72 8 \
+        "GIMP"       "GIMP — image editor (apt)                $_gimp"     $(_chk $inst_gimp)     \
+        "INKSCAPE"   "Inkscape — vector graphics (PPA)         $_inkscape" $(_chk $inst_inkscape) \
+        "FFMPEG"     "FFmpeg — video/audio processing (apt)    $_ffmpeg"   $(_chk $inst_ffmpeg)   \
+        "KICAD"      "KiCad — PCB/electronics design (PPA)     $_kicad"    $(_chk $inst_kicad)    \
+        "ARDUINO"    "Arduino IDE — serial-safe AppImage       $_arduino"  $(_chk $inst_arduino)  \
+        "FROG"       "Frog OCR — text from images (Flatpak)    $_frog"     $(_chk $inst_frog)     \
+        "CONKY"      "Conky — desktop system monitor (apt)     $_conky"    $(_chk $inst_conky)    \
+        "GUFW"       "gufw — firewall GUI (apt)                $_gufw"     $(_chk $inst_gufw)     \
         3>&1 1>&2 2>&3) || return
 
     [[ "$CHOICES" == *"GIMP"*     ]] && apt_install gimp gimp-plugin-registry
@@ -2413,9 +2695,10 @@ run_menu() {
     while true; do
         local CHOICE
         CHOICE=$(whiptail \
-            --title "iTechniqs Linux Setup v2.1.0 — Main Menu" \
+            --title "iTechniqs Linux Setup v3.0.0 — Main Menu" \
             --menu "\nSelect a module:  (arrow keys, Enter to run)\n" \
-            30 72 15 \
+            32 72 16 \
+            " 0" "Boot Sequence        — health check + drivers + essentials" \
             " 1" "System Essentials    — curl, git, sensors, Terminator…" \
             " 2" "System Tweaks        — swappiness, I/O scheduler, sysctl…" \
             " 3" "Package Infra        — Flatpak + Flathub + AppImageLauncher" \
@@ -2435,6 +2718,7 @@ run_menu() {
             3>&1 1>&2 2>&3) || break
 
         case "${CHOICE// /}" in
+            0)  run_boot_sequence ;;
             1)  install_essentials ;;
             2)  apply_tweaks ;;
             3)  setup_package_infrastructure ;;
@@ -2459,12 +2743,89 @@ run_menu() {
     done
 }
 
+# =============================================================================
+#  BOOT SEQUENCE
+#  Runs automatically on first launch or after any logged errors.
+#  Can always be forced via menu option 0 or Run All.
+#
+#  Order (v3.0 spec):
+#    1. inxi system profile  — hardware interrogation (Phase 1/2, future)
+#    2. Health check         — baseline scan, log issues before anything installs
+#    3. Drivers & Hardware   — get hardware working correctly first
+#    4. System Essentials    — build software on top of known-good hardware
+# =============================================================================
+
+BOOT_SENTINEL="/var/log/itechniqs-setup.last"
+
+# Returns 0 (true) if boot sequence should run automatically
+needs_boot_sequence() {
+    # Always run if sentinel doesn't exist (first run)
+    [[ ! -f "$BOOT_SENTINEL" ]] && return 0
+
+    # Always run if the log contains any error lines (✖) since the last boot run
+    local last_boot
+    last_boot=$(cat "$BOOT_SENTINEL" 2>/dev/null | grep '^timestamp=' | cut -d= -f2)
+    if [[ -n "$last_boot" && -f "$LOG_FILE" ]]; then
+        # Check for error lines written after the last boot sequence timestamp
+        if awk -v ts="$last_boot" '$0 ~ ts {found=1} found && /✖/' "$LOG_FILE" \
+                2>/dev/null | grep -q '✖'; then
+            return 0
+        fi
+    fi
+
+    return 1  # Sentinel exists and no errors — skip auto boot
+}
+
+write_boot_sentinel() {
+    local status="${1:-ok}"
+    sudo tee "$BOOT_SENTINEL" > /dev/null << EOF
+timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+status=$status
+version=3.0.0
+EOF
+    sudo chmod 644 "$BOOT_SENTINEL" 2>/dev/null || true
+}
+
+run_boot_sequence() {
+    hdr "Boot Sequence — health check + drivers + essentials"
+
+    # ── Step 1: ensure inxi is available (needed for health check) ────────────
+    if ! command -v inxi &>/dev/null; then
+        log "inxi not found — installing silently (required for health check)…"
+        sudo apt-get install -y -qq inxi >> "$LOG_FILE" 2>&1 \
+            && ok "inxi installed." \
+            || warn "inxi install failed — health check will be limited."
+    fi
+
+    # ── Step 2: baseline health check ────────────────────────────────────────
+    log "Running baseline health check…"
+    if [[ -x "$HEALTH_SCRIPT" ]]; then
+        sudo "$HEALTH_SCRIPT" >> "$LOG_FILE" 2>&1
+        ok "Baseline health check complete — see /var/log/itechniqs-reports/"
+    else
+        warn "Health daemon not installed yet — skipping health check."
+        warn "Install Module 11 after setup, then re-run the boot sequence."
+    fi
+
+    # ── Step 3: drivers & hardware ────────────────────────────────────────────
+    install_drivers
+
+    # ── Step 4: system essentials ─────────────────────────────────────────────
+    install_essentials
+
+    # ── Record successful boot sequence run ───────────────────────────────────
+    write_boot_sentinel "ok"
+    ok "Boot sequence complete."
+}
+
 run_all() {
     whiptail --yesno \
         "This will run ALL modules in sequence.\n\nRecommended for a fresh machine install.\nThis will take 20-40 minutes depending on your connection.\n\nMake sure you have internet access.\n\nProceed?" \
         12 60 --title "Run All Modules" || return
 
-    install_essentials
+    # Boot sequence always runs unconditionally in Run All
+    run_boot_sequence
+
     apply_tweaks
     setup_package_infrastructure
     setup_dotfiles
@@ -2473,14 +2834,13 @@ run_all() {
     install_creative_tools
     install_security_tools
     setup_agent_system
-    install_drivers
     install_health_daemon
     install_media_system_tools
     install_security_monitoring
 
     echo ""
     ok "══════════════════════════════════════════════════"
-    ok "  iTechniqs setup complete — v2.1.0"
+    ok "  iTechniqs setup complete — v3.0.0"
     ok "══════════════════════════════════════════════════"
     ok "  Log        : $LOG_FILE"
     ok "  Alert log  : $ALERT_LOG"
@@ -2515,7 +2875,21 @@ main() {
     check_not_root
     detect_distro
     detect_hardware
+    apply_whiptail_theme
     ensure_whiptail
+
+    # ── Auto boot sequence: runs on first launch or after logged errors ────────
+    if needs_boot_sequence; then
+        local reason
+        [[ ! -f "$BOOT_SENTINEL" ]] \
+            && reason="First run detected — running boot sequence automatically." \
+            || reason="Errors found in log since last run — running boot sequence."
+        whiptail --msgbox \
+            "$reason\n\nThis will:\n  1. Install inxi (if missing)\n  2. Run a baseline health check\n  3. Install/update drivers\n  4. Install system essentials\n\nPress OK to continue." \
+            14 62 --title "Boot Sequence"
+        run_boot_sequence
+    fi
+
     run_menu
     echo ""
     echo -e "${CYAN}${BOLD}iTechniqs setup complete.${RESET}"
@@ -2525,3 +2899,4 @@ main() {
 }
 
 main "$@"
+

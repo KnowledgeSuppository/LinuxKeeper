@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  iTechniqs Linux Setup Script  v2.1.0
+#  iTechniqs Linux Setup Script  v3.0.0 (Phase 3 — version-aware checklists)
 #  "From code, to Core"
 #  Author  : Graham Adams
 #  Website : https://itechniqs.co.za
@@ -53,6 +53,298 @@ HAS_INTEL_GPU=false
 IS_LAPTOP=false
 IS_VM=false
 
+# =============================================================================
+#  PHASE 3 — VERSION-AWARE CHECKLIST HELPERS
+#  Each function returns a label string: "Tool name  [installed: x.y.z]"
+#  or "Tool name  [not installed]". Used to build dynamic whiptail checklists.
+#  All functions are silent — no logging, no stdout except the return value.
+# =============================================================================
+
+# Generic: check if dpkg package installed, return version
+_dpkg_ver() {
+    local pkg="$1"
+    dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null | grep -v '^$' || echo ""
+}
+
+# Generic: check if a command exists, return its version via a flag
+_cmd_ver() {
+    local cmd="$1" flag="${2:---version}"
+    command -v "$cmd" &>/dev/null || { echo ""; return; }
+    "$cmd" $flag 2>/dev/null | head -1 | grep -oP '\d+[\d.]+' | head -1 || echo "installed"
+}
+
+# ── Suffix helpers ────────────────────────────────────────────────────────────
+# Returns "[installed: x.y.z]" or "[not installed]"
+_ver_tag() {
+    local ver="$1"
+    [[ -n "$ver" ]] && echo "[installed: $ver]" || echo "[not installed]"
+}
+
+# Returns "[installed: x.y.z, running]", "[installed: x.y.z, stopped]", or "[not installed]"
+_ver_tag_service() {
+    local ver="$1" svc="$2"
+    if [[ -z "$ver" ]]; then echo "[not installed]"; return; fi
+    if systemctl is-active "$svc" &>/dev/null; then
+        echo "[installed: $ver, running]"
+    else
+        echo "[installed: $ver, stopped]"
+    fi
+}
+
+# ── Per-tool version detectors ────────────────────────────────────────────────
+
+ver_sdkman() {
+    local v=""
+    [[ -f "$HOME/.sdkman/bin/sdkman-init.sh" ]] && \
+        v=$(cat "$HOME/.sdkman/var/version" 2>/dev/null | tr -d '[:space:]')
+    _ver_tag "$v"
+}
+
+ver_jdk() {
+    local slot="$1"   # e.g. "17" or "21"
+    local v=""
+    # Check SDKMAN candidate first
+    if [[ -d "$HOME/.sdkman/candidates/java" ]]; then
+        v=$(ls "$HOME/.sdkman/candidates/java/" 2>/dev/null \
+            | grep "^${slot}\." | sort -V | tail -1)
+    fi
+    # Fallback: system java if it matches the requested slot
+    if [[ -z "$v" ]] && command -v java &>/dev/null; then
+        local sys_ver
+        sys_ver=$(java -version 2>&1 | grep -oP '"\K[\d.]+' | head -1)
+        [[ "$sys_ver" == ${slot}.* ]] && v="$sys_ver"
+    fi
+    _ver_tag "$v"
+}
+
+ver_kotlin() {
+    local v=""
+    if [[ -d "$HOME/.sdkman/candidates/kotlin" ]]; then
+        v=$(ls "$HOME/.sdkman/candidates/kotlin/" 2>/dev/null \
+            | grep -v 'current' | sort -V | tail -1)
+    fi
+    [[ -z "$v" ]] && command -v kotlinc &>/dev/null && \
+        v=$(kotlinc -version 2>&1 | grep -oP '\d[\d.]+' | head -1)
+    _ver_tag "$v"
+}
+
+ver_gradle() {
+    local v=""
+    if [[ -d "$HOME/.sdkman/candidates/gradle" ]]; then
+        v=$(ls "$HOME/.sdkman/candidates/gradle/" 2>/dev/null \
+            | grep -v 'current' | sort -V | tail -1)
+    fi
+    [[ -z "$v" ]] && command -v gradle &>/dev/null && \
+        v=$(gradle --version 2>/dev/null | grep '^Gradle' | grep -oP '\d[\d.]+' | head -1)
+    _ver_tag "$v"
+}
+
+ver_android_sdk() {
+    local v=""
+    local sdk_dir="${ANDROID_HOME:-$HOME/Android/Sdk}"
+    if [[ -d "$sdk_dir/cmdline-tools/latest" ]]; then
+        v=$(cat "$sdk_dir/cmdline-tools/latest/source.properties" 2>/dev/null \
+            | grep 'Pkg.Revision' | cut -d= -f2 | tr -d ' ')
+        [[ -z "$v" ]] && v="installed"
+    fi
+    _ver_tag "$v"
+}
+
+ver_toolbox() {
+    local v=""
+    local tb="$HOME/.local/share/JetBrains/Toolbox/bin/jetbrains-toolbox"
+    if [[ -f "$tb" ]]; then
+        v=$(strings "$tb" 2>/dev/null | grep -oP '^\d+\.\d+[\d.]*$' | sort -V | tail -1)
+        [[ -z "$v" ]] && v="installed"
+    fi
+    _ver_tag "$v"
+}
+
+ver_docker() {
+    local v=""
+    command -v docker &>/dev/null && \
+        v=$(docker --version 2>/dev/null | grep -oP '\d[\d.]+' | head -1)
+    _ver_tag_service "$v" "docker"
+}
+
+ver_python() {
+    local v
+    v=$(_cmd_ver python3 --version)
+    _ver_tag "$v"
+}
+
+ver_nodejs() {
+    local v
+    v=$(_cmd_ver node --version)
+    # node --version returns "v18.x.x" — strip leading 'v'
+    v="${v#v}"
+    _ver_tag "$v"
+}
+
+ver_gemini_cli() {
+    local v=""
+    command -v gemini &>/dev/null && v=$(gemini --version 2>/dev/null | head -1 | grep -oP '\d[\d.]+' | head -1)
+    [[ -z "$v" ]] && command -v gemini &>/dev/null && v="installed"
+    _ver_tag "$v"
+}
+
+ver_qwen_cli() {
+    local v=""
+    command -v pip3 &>/dev/null && \
+        v=$(pip3 show qwen-agent 2>/dev/null | grep '^Version' | awk '{print $2}')
+    _ver_tag "$v"
+}
+
+ver_dbeaver() {
+    local v
+    v=$(_dpkg_ver dbeaver-ce)
+    _ver_tag "$v"
+}
+
+ver_postman() {
+    local v=""
+    flatpak list --app 2>/dev/null | grep -q "com.getpostman.Postman" && v="installed (Flatpak)"
+    _ver_tag "$v"
+}
+
+ver_pg_client() {
+    local v
+    v=$(_cmd_ver psql --version)
+    _ver_tag "$v"
+}
+
+ver_chrome() {
+    local v
+    v=$(_dpkg_ver google-chrome-stable)
+    _ver_tag "$v"
+}
+
+ver_appimage_tools() {
+    local aria_v apt_v
+    aria_v=$(_dpkg_ver aria2)
+    apt_v=$(_dpkg_ver libfuse2)
+    if [[ -n "$aria_v" && -n "$apt_v" ]]; then
+        echo "[installed: aria2 $aria_v]"
+    elif [[ -n "$aria_v" ]]; then
+        echo "[aria2 installed, libfuse2 missing]"
+    else
+        echo "[not installed]"
+    fi
+}
+
+# ── Module 7: Creative tools ──────────────────────────────────────────────────
+
+ver_gimp() {
+    local v; v=$(_dpkg_ver gimp); _ver_tag "$v"
+}
+
+ver_inkscape() {
+    local v; v=$(_cmd_ver inkscape --version); _ver_tag "$v"
+}
+
+ver_ffmpeg() {
+    local v; v=$(_cmd_ver ffmpeg -version); _ver_tag "$v"
+}
+
+ver_kicad() {
+    local v; v=$(_dpkg_ver kicad); _ver_tag "$v"
+}
+
+ver_arduino() {
+    local v=""
+    [[ -f "$APPIMAGE_DIR/Arduino-IDE.AppImage" ]] && v="AppImage present"
+    _ver_tag "$v"
+}
+
+ver_frog() {
+    local v=""
+    flatpak list --app 2>/dev/null | grep -q "com.github.tenderowl.frog" && v="installed (Flatpak)"
+    _ver_tag "$v"
+}
+
+ver_conky() {
+    local v; v=$(_dpkg_ver conky-all); _ver_tag "$v"
+}
+
+ver_gufw() {
+    local v; v=$(_dpkg_ver gufw); _ver_tag "$v"
+}
+
+# ── Module 8: Security/network tools ─────────────────────────────────────────
+
+ver_wireshark() {
+    local v; v=$(_dpkg_ver wireshark); _ver_tag "$v"
+}
+
+ver_aircrack() {
+    local v; v=$(_dpkg_ver aircrack-ng); _ver_tag "$v"
+}
+
+ver_gparted() {
+    local v; v=$(_dpkg_ver gparted); _ver_tag "$v"
+}
+
+ver_nmap() {
+    local v; v=$(_cmd_ver nmap --version); _ver_tag "$v"
+}
+
+ver_usbguard() {
+    local v; v=$(_dpkg_ver usbguard); _ver_tag "$v"
+}
+
+# ── Module 12: Media/system tools ────────────────────────────────────────────
+
+ver_restricted_extras() {
+    local v; v=$(_dpkg_ver ubuntu-restricted-extras); _ver_tag "$v"
+}
+
+ver_vlc() {
+    local v; v=$(_dpkg_ver vlc); _ver_tag "$v"
+}
+
+ver_kodi() {
+    local v; v=$(_dpkg_ver kodi); _ver_tag "$v"
+}
+
+ver_stremio() {
+    local v=""
+    [[ -f "$APPIMAGE_DIR/Stremio.AppImage" ]] && v="AppImage present"
+    _ver_tag "$v"
+}
+
+ver_timeshift() {
+    local v; v=$(_dpkg_ver timeshift); _ver_tag "$v"
+}
+
+ver_gnome_tweaks() {
+    local v; v=$(_dpkg_ver gnome-tweaks); _ver_tag "$v"
+}
+
+ver_nala() {
+    local v; v=$(_dpkg_ver nala); _ver_tag "$v"
+}
+
+ver_inxi() {
+    local v; v=$(_cmd_ver inxi --version); _ver_tag "$v"
+}
+
+# ── Module 13: Security monitoring ───────────────────────────────────────────
+
+ver_fail2ban() {
+    local v; v=$(_dpkg_ver fail2ban)
+    _ver_tag_service "$v" "fail2ban"
+}
+
+ver_rkhunter() {
+    local v; v=$(_dpkg_ver rkhunter); _ver_tag "$v"
+}
+
+ver_ufw_log() {
+    local v=""
+    [[ -f "/usr/local/bin/itechniqs-ufw-watcher" ]] && v="configured"
+    _ver_tag "$v"
+}
+
 # ─── Logging ─────────────────────────────────────────────────────────────────
 log()  { echo -e "${DIM}[$(date '+%H:%M:%S')]${RESET} $*" | tee -a "$LOG_FILE"; }
 ok()   { echo -e "${GREEN}✔${RESET}  $*" | tee -a "$LOG_FILE"; }
@@ -66,7 +358,7 @@ show_banner() {
     clear
     echo -e "${CYAN}${BOLD}"
     echo "  ╔══════════════════════════════════════════════════════╗"
-    echo "  ║       iTechniqs  Linux  Setup  v2.1.0                ║"
+    echo "  ║       iTechniqs  Linux  Setup  v3.0.0                ║"
     echo "  ║           \"From code, to Core\"                       ║"
     echo "  ╠══════════════════════════════════════════════════════╣"
     echo "  ║  Install policy:                                      ║"
@@ -758,26 +1050,48 @@ SSHEOF
 install_dev_tools() {
     hdr "Developer Tools"
 
+    # Phase 3: build version-aware labels before showing the checklist
+    local _sdk  _jdk17 _jdk21 _kotlin _gradle _android _toolbox
+    local _docker _python _nodejs _gemini _qwen _dbeaver _postman
+    local _pg _chrome _appimg
+    _sdk=$( ver_sdkman)
+    _jdk17=$(ver_jdk 17)
+    _jdk21=$(ver_jdk 21)
+    _kotlin=$(ver_kotlin)
+    _gradle=$(ver_gradle)
+    _android=$(ver_android_sdk)
+    _toolbox=$(ver_toolbox)
+    _docker=$( ver_docker)
+    _python=$( ver_python)
+    _nodejs=$( ver_nodejs)
+    _gemini=$( ver_gemini_cli)
+    _qwen=$(   ver_qwen_cli)
+    _dbeaver=$(ver_dbeaver)
+    _postman=$(ver_postman)
+    _pg=$(     ver_pg_client)
+    _chrome=$( ver_chrome)
+    _appimg=$( ver_appimage_tools)
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select developer tools to install:" 28 65 18 \
-        "SDKMAN"         "SDKMAN — JDK/Kotlin/Gradle version manager"  ON  \
-        "JDK17"          "OpenJDK 17 LTS (via SDKMAN)"                 ON  \
-        "JDK21"          "OpenJDK 21 LTS (via SDKMAN)"                 OFF \
-        "KOTLIN"         "Kotlin compiler (via SDKMAN)"                ON  \
-        "GRADLE"         "Gradle build tool (via SDKMAN)"              ON  \
-        "ANDROID_SDK"    "Android command-line tools"                  ON  \
-        "TOOLBOX"        "JetBrains Toolbox (IDEs manager)"            ON  \
-        "DOCKER"         "Docker Engine + Compose plugin"              ON  \
-        "PYTHON"         "Python 3 + pip + venv + pipx"                ON  \
-        "NODEJS"         "Node.js LTS (via NodeSource)"                ON  \
-        "GEMINI_CLI"     "Gemini CLI (npm)"                            ON  \
-        "QWEN_CLI"       "Qwen CLI (pip)"                              ON  \
-        "DBEAVER"        "DBeaver CE (PostgreSQL GUI, .deb)"           ON  \
-        "POSTMAN"        "Postman (Flatpak)"                           ON  \
-        "PG_CLIENT"      "PostgreSQL client (psql)"                    ON  \
-        "CHROME"         "Google Chrome (.deb, official repo)"         ON  \
-        "APPIMAGE_TOOLS" "AppImage tools + aria2 downloader"           ON  \
+        "Select developer tools to install:" 28 72 18 \
+        "SDKMAN"         "SDKMAN — version manager              $_sdk"     ON  \
+        "JDK17"          "OpenJDK 17 LTS (via SDKMAN)           $_jdk17"   ON  \
+        "JDK21"          "OpenJDK 21 LTS (via SDKMAN)           $_jdk21"   OFF \
+        "KOTLIN"         "Kotlin compiler (via SDKMAN)          $_kotlin"  ON  \
+        "GRADLE"         "Gradle build tool (via SDKMAN)        $_gradle"  ON  \
+        "ANDROID_SDK"    "Android command-line tools            $_android" ON  \
+        "TOOLBOX"        "JetBrains Toolbox (IDEs manager)      $_toolbox" ON  \
+        "DOCKER"         "Docker Engine + Compose plugin        $_docker"  ON  \
+        "PYTHON"         "Python 3 + pip + venv + pipx          $_python"  ON  \
+        "NODEJS"         "Node.js LTS (via NodeSource)          $_nodejs"  ON  \
+        "GEMINI_CLI"     "Gemini CLI (npm)                      $_gemini"  ON  \
+        "QWEN_CLI"       "Qwen CLI (pip)                        $_qwen"    ON  \
+        "DBEAVER"        "DBeaver CE (PostgreSQL GUI, .deb)     $_dbeaver" ON  \
+        "POSTMAN"        "Postman (Flatpak)                     $_postman" ON  \
+        "PG_CLIENT"      "PostgreSQL client (psql)              $_pg"      ON  \
+        "CHROME"         "Google Chrome (.deb, official repo)   $_chrome"  ON  \
+        "APPIMAGE_TOOLS" "AppImage tools + aria2 downloader     $_appimg"  ON  \
         3>&1 1>&2 2>&3) || return
 
     apt_update
@@ -1000,17 +1314,28 @@ install_chrome() {
 install_creative_tools() {
     hdr "Creative & Engineering Tools"
 
+    # Phase 3: build version-aware labels
+    local _gimp _inkscape _ffmpeg _kicad _arduino _frog _conky _gufw
+    _gimp=$(    ver_gimp)
+    _inkscape=$(ver_inkscape)
+    _ffmpeg=$(  ver_ffmpeg)
+    _kicad=$(   ver_kicad)
+    _arduino=$( ver_arduino)
+    _frog=$(    ver_frog)
+    _conky=$(   ver_conky)
+    _gufw=$(    ver_gufw)
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select creative/engineering tools:" 24 65 12 \
-        "GIMP"       "GIMP (apt — image editor)"                  ON  \
-        "INKSCAPE"   "Inkscape (apt PPA — vector graphics)"       ON  \
-        "FFMPEG"     "FFmpeg (apt — video/audio processing)"      ON  \
-        "KICAD"      "KiCad (apt PPA — PCB/electronics design)"   ON  \
-        "ARDUINO"    "Arduino IDE (AppImage — avoids snap bugs)"  ON  \
-        "FROG"       "Frog OCR (Flatpak — text from images)"      ON  \
-        "CONKY"      "Conky (apt — desktop system monitor)"       ON  \
-        "GUFW"       "gufw (apt — firewall GUI)"                  ON  \
+        "Select creative/engineering tools:" 24 72 8 \
+        "GIMP"       "GIMP — image editor (apt)                $_gimp"     ON  \
+        "INKSCAPE"   "Inkscape — vector graphics (PPA)         $_inkscape" ON  \
+        "FFMPEG"     "FFmpeg — video/audio processing (apt)    $_ffmpeg"   ON  \
+        "KICAD"      "KiCad — PCB/electronics design (PPA)     $_kicad"   ON  \
+        "ARDUINO"    "Arduino IDE — serial-safe AppImage       $_arduino"  ON  \
+        "FROG"       "Frog OCR — text from images (Flatpak)    $_frog"     ON  \
+        "CONKY"      "Conky — desktop system monitor (apt)     $_conky"    ON  \
+        "GUFW"       "gufw — firewall GUI (apt)                $_gufw"     ON  \
         3>&1 1>&2 2>&3) || return
 
     [[ "$CHOICES" == *"GIMP"*     ]] && apt_install gimp gimp-plugin-registry
@@ -1137,18 +1462,26 @@ CONKYEOF
 install_security_tools() {
     hdr "Security & Network Tools"
 
+    # Phase 3: build version-aware labels
+    local _wireshark _aircrack _gparted _nmap _usbguard
+    _wireshark=$(ver_wireshark)
+    _aircrack=$( ver_aircrack)
+    _gparted=$(  ver_gparted)
+    _nmap=$(     ver_nmap)
+    _usbguard=$( ver_usbguard)
+
     # Aircrack-ng requires a real Wi-Fi adapter — useless in a VM
-    local aircrack_label="Aircrack-ng (apt — Wi-Fi security)"
+    local aircrack_label="Aircrack-ng — Wi-Fi security (apt)     $_aircrack"
     $IS_VM && aircrack_label="Aircrack-ng — SKIPPED IN VM (needs real Wi-Fi adapter)"
 
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select security/network tools:" 16 65 6 \
-        "WIRESHARK"   "Wireshark (apt — network analyser)"         ON  \
-        "AIRCRACK"    "$aircrack_label"                            ON  \
-        "GPARTED"     "GParted (apt — partition editor)"           ON  \
-        "NMAP"        "nmap + zenmap (apt)"                        ON  \
-        "USBGUARD"    "USBGuard (apt — USB device policy)"         OFF \
+        "Select security/network tools:" 16 72 5 \
+        "WIRESHARK"   "Wireshark — network analyser (apt)      $_wireshark" ON  \
+        "AIRCRACK"    "$aircrack_label"                                      ON  \
+        "GPARTED"     "GParted — partition editor (apt)        $_gparted"   ON  \
+        "NMAP"        "nmap + zenmap (apt)                     $_nmap"      ON  \
+        "USBGUARD"    "USBGuard — USB device policy (apt)      $_usbguard"  OFF \
         3>&1 1>&2 2>&3) || return
 
     [[ "$CHOICES" == *"WIRESHARK"* ]] && install_wireshark
@@ -1596,31 +1929,42 @@ CRONEOF
 install_media_system_tools() {
     hdr "Media & System Tools"
 
+    # Phase 3: build version-aware labels
+    local _restricted _vlc _kodi _stremio _timeshift _tweaks _nala _inxi
+    _restricted=$(ver_restricted_extras)
+    _vlc=$(       ver_vlc)
+    _kodi=$(      ver_kodi)
+    _stremio=$(   ver_stremio)
+    _timeshift=$( ver_timeshift)
+    _tweaks=$(    ver_gnome_tweaks)
+    _nala=$(      ver_nala)
+    _inxi=$(      ver_inxi)
+
     # Build menu — flag items that won't work in a VM
-    local kodi_label="Kodi (apt PPA — media centre)"
-    $IS_VM && kodi_label="Kodi — NOTE: no GPU accel in VM, video may stutter"
+    local kodi_label="Kodi — media centre (PPA)               $_kodi"
+    $IS_VM && kodi_label="Kodi — NOTE: no GPU accel in VM, may stutter  $_kodi"
 
     # gnome-tweaks only makes sense on GNOME
     local tweaks_label tweaks_default="ON"
     local DESKTOP_ENV="${XDG_CURRENT_DESKTOP:-unknown}"
     if echo "$DESKTOP_ENV" | grep -qi "gnome"; then
-        tweaks_label="GNOME Tweaks (apt — fonts, extensions, theme)"
+        tweaks_label="GNOME Tweaks — fonts, extensions (apt)  $_tweaks"
     else
-        tweaks_label="GNOME Tweaks — SKIPPED: not on GNOME ($DESKTOP_ENV)"
+        tweaks_label="GNOME Tweaks — SKIPPED: not GNOME ($DESKTOP_ENV)"
         tweaks_default="OFF"
     fi
 
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select media & system tools to install:" 26 68 12 \
-        "RESTRICTED"  "ubuntu-restricted-extras (codecs, MS fonts)"  ON  \
-        "VLC"         "VLC media player (apt)"                        ON  \
-        "KODI"        "$kodi_label"                                   ON  \
-        "STREMIO"     "Stremio (AppImage — streaming aggregator)"     ON  \
-        "TIMESHIFT"   "Timeshift (apt — system snapshots, RSYNC)"     ON  \
-        "TWEAKS"      "$tweaks_label"                                 "$tweaks_default" \
-        "NALA"        "Nala (apt — prettier apt frontend)"            ON  \
-        "INXI"        "inxi (apt — system info, feeds health report)" ON  \
+        "Select media & system tools to install:" 26 72 8 \
+        "RESTRICTED"  "ubuntu-restricted-extras (codecs, fonts) $_restricted" ON  \
+        "VLC"         "VLC media player (apt)                  $_vlc"         ON  \
+        "KODI"        "$kodi_label"                                            ON  \
+        "STREMIO"     "Stremio — streaming aggregator (AppImg) $_stremio"     ON  \
+        "TIMESHIFT"   "Timeshift — system snapshots, RSYNC     $_timeshift"   ON  \
+        "TWEAKS"      "$tweaks_label"                                          "$tweaks_default" \
+        "NALA"        "Nala — prettier apt frontend (apt)      $_nala"        ON  \
+        "INXI"        "inxi — system info, feeds health report $_inxi"        ON  \
         3>&1 1>&2 2>&3) || return
 
     apt_update
@@ -1799,12 +2143,18 @@ ALERT_SCRIPT="/usr/local/bin/itechniqs-alert"
 install_security_monitoring() {
     hdr "Security Monitoring"
 
+    # Phase 3: build version-aware labels
+    local _fail2ban _rkhunter _ufw_log
+    _fail2ban=$(ver_fail2ban)
+    _rkhunter=$( ver_rkhunter)
+    _ufw_log=$(  ver_ufw_log)
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select security monitoring tools:" 16 68 4 \
-        "FAIL2BAN"  "fail2ban — ban IPs after repeated auth failures"   ON  \
-        "RKHUNTER"  "rkhunter — weekly rootkit scanner"                 ON  \
-        "UFW_LOG"   "UFW logging + watcher — real-time block alerts"    ON  \
+        "Select security monitoring tools:" 16 72 3 \
+        "FAIL2BAN"  "fail2ban — ban IPs on auth failures       $_fail2ban"  ON  \
+        "RKHUNTER"  "rkhunter — weekly rootkit scanner         $_rkhunter"  ON  \
+        "UFW_LOG"   "UFW watcher — real-time block alerts      $_ufw_log"   ON  \
         3>&1 1>&2 2>&3) || return
 
     # Install the central alert dispatcher first — everything else uses it

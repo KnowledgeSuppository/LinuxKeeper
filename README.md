@@ -324,8 +324,6 @@ MIT — use freely, modify as needed.
 
 ==============================================
 
-Absolutely — MIT license covers liability legally, but a proper disclaimer in the README makes it explicit for users who might not read the license. Something like:
-
 ⚠️ Use at your own risk. LinuxKeeper modifies system configuration, installs packages, and makes hardware-level changes. While every effort has been made to ensure safety, iTechniqs takes no responsibility for data loss, system instability, or any damage resulting from the use of this script. Always have a Timeshift or system backup before running.
 
 =============================================

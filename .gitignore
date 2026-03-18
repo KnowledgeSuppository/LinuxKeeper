@@ -1,0 +1,20 @@
+# LinuxKeeper .gitignore
+
+# Logs — never commit logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.bak
+*~
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit these
+*.key
+*.pem
+*.env
+.env*

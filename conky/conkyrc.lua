@@ -58,9 +58,9 @@ conky.config = {
     alignment           = 'top_right',
     gap_x               = 10,
     gap_y               = 35,
-    minimum_width       = 340,
+    minimum_width       = 355,
     minimum_height      = 500,
-    maximum_width       = 380,
+    maximum_width       = 395,
     border_inner_margin = 0,
     border_outer_margin = 10,
 
@@ -175,8 +175,8 @@ ${offset 145}${upspeedgraph eth0 30,0 4B1B0C FF5C2B 10240KiB -l}
 ${offset 145}${downspeedgraph eth0 30,0 324D23 77B753 10240KiB -l}
 ${endif}\
 ${endif}\
-${voffset -105}${goto 95}${font Ubuntu:style=Bold:size=12}${color6}    NET
-${voffset 165}\
+${voffset -85}${goto 95}${font Ubuntu:style=Bold:size=12}${color6}       NET
+${voffset 105}\
 # ══════════════════════════════════════════
 #  EXTRA INFO — add freely below, ring alignment is done
 # ══════════════════════════════════════════

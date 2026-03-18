@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/lkBanner.png" />
+  <img src="assets/lKBanner.svg" />
 </div>
 ![Build](https://img.shields.io/badge/build-passing-2ab32a)
 ![Version](https://img.shields.io/badge/v0.1.0-blue?logo=discord)

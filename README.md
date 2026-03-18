@@ -1,3 +1,11 @@
+<div align="center">
+  <img src="conky/lkLogoWhite.png" width="180"/>
+  <h1>LINUXKEEPER</h1>
+  <p>Ubuntu/Debian Toolkit</p>
+  <p><strong>SECURE, OPTIMIZE, MAINTAIN!</strong></p>
+</div>
+
+
 # LinuxKeeper
 ### Ubuntu/Debian Linux Setup & Maintenance Toolkit
 *by iTechniqs — "From code, to Core"*

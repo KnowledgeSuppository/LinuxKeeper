@@ -1,14 +1,24 @@
 <div align="center">
+<<<<<<< HEAD
   <img src="assets/lkBanner.png" />
+=======
+  <img src="assets/lKBanner.svg" />
+
+  <p>
+    <img src="https://img.shields.io/badge/build-passing-2ab32a?style=flat-square"/>
+    <img src="https://img.shields.io/badge/version-v3.0.0-2ab32a?style=flat-square"/>
+    <img src="https://img.shields.io/badge/license-MIT-2ab32a?style=flat-square"/>
+    <img src="https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-orange?style=flat-square&logo=ubuntu&logoColor=white"/>
+    <img src="https://img.shields.io/badge/Debian-12+-red?style=flat-square&logo=debian&logoColor=white"/>
+  </p>
+
+  <p><em>iTechniqs — "From code, to Core"</em></p>
+>>>>>>> 673d510 (docs: v3.0.0 README — banner, badges, boot sequence)
 </div>
-![Build](https://img.shields.io/badge/build-passing-2ab32a) ![Version](https://img.shields.io/badge/v0.1.0-blue?logo=discord)
 
-# LinuxKeeper
-### Ubuntu/Debian Linux Setup & Maintenance Toolkit
-*by iTechniqs — "From code, to Core"*
+---
 
-A personal Linux setup toolkit for Ubuntu 22.04+ / Debian 12+ systems.  
-Modelled after [Linutil](https://github.com/ChrisTitusTech/linutil) but tailored for KMP development and the iTechniqs stack.
+**LinuxKeeper** is a toolkit for setting up and maintaining **Ubuntu** and **Debian** systems. Automate installs, optimize performance, and monitor your system in a simplified, secure environment.
 
 ---
 

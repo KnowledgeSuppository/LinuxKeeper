@@ -469,6 +469,14 @@ detect_distro() {
 detect_hardware() {
     log "Detecting hardware…"
 
+    # Ensure pciutils is available — lspci is needed for GPU detection.
+    # This must be installed here because detect_hardware runs before
+    # install_essentials in the boot sequence.
+    if ! command -v lspci &>/dev/null; then
+        log "pciutils not found — installing silently (required for GPU detection)…"
+        sudo apt-get install -y -qq pciutils >> "$LOG_FILE" 2>&1 || true
+    fi
+
     # VM detection
     local virt
     virt=$(systemd-detect-virt 2>/dev/null) || virt="none"
@@ -484,9 +492,10 @@ detect_hardware() {
     fi
 
     # GPU detection
-    if lspci 2>/dev/null | grep -qi "nvidia";                       then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
-    if lspci 2>/dev/null | grep -qi "amd\|radeon";                  then HAS_AMD=true;       ok "GPU: AMD detected."; fi
-    if lspci 2>/dev/null | grep -qi "intel.*graphics\|intel.*vga";  then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
+    # AMD covers: "amd", "radeon", "Advanced Micro Devices", "ATI"
+    if lspci 2>/dev/null | grep -qi "nvidia";                                          then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
+    if lspci 2>/dev/null | grep -qi "amd\|radeon\|advanced micro devices\|ati";        then HAS_AMD=true;       ok "GPU: AMD detected."; fi
+    if lspci 2>/dev/null | grep -qi "intel.*graphics\|intel.*vga\|intel.*display";     then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
 
     # Disk type detection
     for bdev in /sys/block/sd? /sys/block/nvme?n?; do

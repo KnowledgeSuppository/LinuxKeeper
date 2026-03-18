@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="conky/lkLogoWhite.png" width="180"/>
+  <img src="assets/lkLogoWhite.png" width="180"/>
   <h1>LINUXKEEPER</h1>
   <p>Ubuntu/Debian Toolkit</p>
   <p><strong>SECURE, OPTIMIZE, MAINTAIN!</strong></p>

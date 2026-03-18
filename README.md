@@ -1,9 +1,13 @@
-<div align="center">
-  <img src="assets/lkLogoWhite.png" width="180"/>
-  <h1>LINUXKEEPER</h1>
-  <p>Ubuntu/Debian Toolkit</p>
-  <p><strong>SECURE, OPTIMIZE, MAINTAIN!</strong></p>
-</div>
+<table>
+  <tr>
+    <td><img src="assets/lkLogoWhite.png" width="180"/></td>
+    <td>
+      <h1>LINUXKEEPER</h1>
+      <p>Ubuntu/Debian Toolkit</p>
+      <p><strong>SECURE, OPTIMIZE, MAINTAIN!</strong></p>
+    </td>
+  </tr>
+</table>
 
 
 # LinuxKeeper

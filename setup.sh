@@ -508,10 +508,13 @@ detect_hardware() {
     # GPU detection
     # AMD covers: "amd", "radeon", "Advanced Micro Devices", "ATI"
     # Note: "ati" must be matched as a whole word — "Intel Corporation" contains "ati"
-    # sudo ensures lspci can read all PCI devices on all systems
-    if sudo lspci 2>/dev/null | grep -qi "nvidia";                                              then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
-    if sudo lspci 2>/dev/null | grep -qi "advanced micro devices\|radeon\|\bati\b\|amdgpu";     then HAS_AMD=true;       ok "GPU: AMD detected."; fi
-    if sudo lspci 2>/dev/null | grep -qi "intel.*graphics\|intel.*vga\|intel.*display";         then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
+    local lspci_out
+    lspci_out=$(lspci 2>/dev/null)
+    log "DEBUG lspci line count: $(echo "$lspci_out" | wc -l)"
+    log "DEBUG AMD grep: $(echo "$lspci_out" | grep -i "advanced micro devices\|radeon\|\bati\b\|amdgpu" || echo "NO MATCH")"
+    if echo "$lspci_out" | grep -qi "nvidia";                                              then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
+    if echo "$lspci_out" | grep -qi "advanced micro devices\|radeon\|\bati\b\|amdgpu";    then HAS_AMD=true;       ok "GPU: AMD detected."; fi
+    if echo "$lspci_out" | grep -qi "intel.*graphics\|intel.*vga\|intel.*display";        then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
 
     # Disk type detection
     for bdev in /sys/block/sd? /sys/block/nvme?n?; do
@@ -2168,7 +2171,7 @@ AUTH_FAIL=${AUTH_FAIL:-0}
 
 # ── 6. DRIVER STATUS ──────────────────────────────────────────────
 hdr "DRIVER STATUS"
-if sudo lspci 2>/dev/null | grep -qi "nvidia"; then
+if lspci 2>/dev/null | grep -qi "nvidia"; then
     if command -v nvidia-smi &>/dev/null; then
         DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo "unknown")
         GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo "unknown")

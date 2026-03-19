@@ -74,6 +74,7 @@ HAS_AMD=false
 HAS_INTEL_GPU=false
 IS_LAPTOP=false
 IS_VM=false
+IS_HEADLESS=false   # true = no display server, SSH-only or console-only
 
 # =============================================================================
 #  PHASE 3 — VERSION-AWARE CHECKLIST HELPERS
@@ -477,6 +478,19 @@ detect_hardware() {
         sudo apt-get install -y -qq pciutils >> "$LOG_FILE" 2>&1 || true
     fi
 
+    # Headless / SSH detection
+    # Headless if: no DISPLAY, no WAYLAND_DISPLAY, no active graphical systemd target,
+    # or connected via SSH with no local display forwarded
+    if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+        if ! systemctl is-active --quiet graphical.target 2>/dev/null; then
+            IS_HEADLESS=true
+        elif [[ -n "${SSH_CONNECTION:-}" && -z "${DISPLAY:-}" ]]; then
+            IS_HEADLESS=true
+        fi
+    fi
+    $IS_HEADLESS && warn "Headless/SSH environment detected — display-dependent modules will be skipped." \
+                 || ok "Desktop environment detected."
+
     # VM detection
     local virt
     virt=$(systemd-detect-virt 2>/dev/null) || virt="none"
@@ -493,9 +507,11 @@ detect_hardware() {
 
     # GPU detection
     # AMD covers: "amd", "radeon", "Advanced Micro Devices", "ATI"
-    if lspci 2>/dev/null | grep -qi "nvidia";                                          then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
-    if lspci 2>/dev/null | grep -qi "amd\|radeon\|advanced micro devices\|ati";        then HAS_AMD=true;       ok "GPU: AMD detected."; fi
-    if lspci 2>/dev/null | grep -qi "intel.*graphics\|intel.*vga\|intel.*display";     then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
+    # Note: "ati" must be matched as a whole word — "Intel Corporation" contains "ati"
+    # sudo ensures lspci can read all PCI devices on all systems
+    if sudo lspci 2>/dev/null | grep -qi "nvidia";                                              then HAS_NVIDIA=true;    ok "GPU: NVIDIA detected."; fi
+    if sudo lspci 2>/dev/null | grep -qi "advanced micro devices\|radeon\|\bati\b\|amdgpu";     then HAS_AMD=true;       ok "GPU: AMD detected."; fi
+    if sudo lspci 2>/dev/null | grep -qi "intel.*graphics\|intel.*vga\|intel.*display";         then HAS_INTEL_GPU=true; ok "GPU: Intel integrated detected."; fi
 
     # Disk type detection
     for bdev in /sys/block/sd? /sys/block/nvme?n?; do
@@ -510,6 +526,21 @@ detect_hardware() {
     # USB serial (for Arduino) — || true prevents set -e exit on no match
     lsmod 2>/dev/null | grep -q "ch341\|cp210\|ftdi_sio\|cdc_acm" \
         && warn "USB serial device detected — Arduino IDE recommended." || true
+
+    # Persist hardware flags to disk — guards against subshell variable loss
+    # when functions are called across process boundaries (e.g. boot sequence)
+    local HW_FLAGS="/tmp/itechniqs-hw-flags"
+    cat > "$HW_FLAGS" << HWEOF
+HAS_NVIDIA=$HAS_NVIDIA
+HAS_AMD=$HAS_AMD
+HAS_INTEL_GPU=$HAS_INTEL_GPU
+HAS_SSD=$HAS_SSD
+HAS_HDD=$HAS_HDD
+IS_LAPTOP=$IS_LAPTOP
+IS_VM=$IS_VM
+IS_HEADLESS=$IS_HEADLESS
+HWEOF
+    ok "Hardware flags saved to $HW_FLAGS"
 }
 
 ensure_log() {
@@ -609,7 +640,17 @@ install_essentials() {
         # Terminal
         terminator
         # Misc
-        fwupd xdg-utils
+        fwupd xdg-utils pciutils
+        # ── Hardware diagnostics (diag.sh) ────────────────────────────────────
+        # Drive health & stress testing
+        fio             # flexible I/O benchmarking — sequential + random R/W tests
+        e2fsprogs       # provides badblocks — bad sector scanning for HDD/SSD
+        nvme-cli        # NVMe health, SMART log, self-test
+        hdparm          # HDD/SSD parameters and read benchmarks
+        # System stress testing
+        stress-ng       # CPU, RAM, and I/O stress testing
+        # Disk info
+        util-linux      # provides lsblk, blockdev
     )
     apt_install "${pkgs[@]}"
 
@@ -617,7 +658,7 @@ install_essentials() {
     sudo sensors-detect --auto >> "$LOG_FILE" 2>&1 || true
 
     # preload — only useful on HDD systems; wastes RAM on SSD/NVMe
-    detect_hardware
+    # HAS_HDD / HAS_SSD flags are already set by detect_hardware() at startup
     if $HAS_HDD && ! $HAS_SSD; then
         log "HDD-only system detected — installing preload (worthwhile on spinning drives)."
         apt_install preload
@@ -686,7 +727,8 @@ EOF
     ok "Journal capped at 500 MB, 3-month retention."
 
     # ── Disable screen blank for dev sessions (optional, desktop only)
-    if cmd_exists gsettings; then
+    # Disable screen blank for dev sessions (desktop only, skip if headless)
+    if ! $IS_HEADLESS && cmd_exists gsettings; then
         gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
         ok "GNOME screen blank disabled."
     fi
@@ -1616,6 +1658,16 @@ install_creative_tools() {
     _conky=$(   ver_conky)
     _gufw=$(    ver_gufw)
 
+    # Conky requires a display — skip on headless
+    local conky_label conky_default
+    if $IS_HEADLESS; then
+        conky_label="Conky — SKIPPED: headless environment"
+        conky_default="OFF"
+    else
+        conky_label="Conky — desktop system monitor (apt)     $_conky"
+        conky_default=$(_chk $inst_conky)
+    fi
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
         "Creative/engineering tools — installed items are OFF by default." 24 72 8 \
@@ -1625,7 +1677,7 @@ install_creative_tools() {
         "KICAD"      "KiCad — PCB/electronics design (PPA)     $_kicad"    $(_chk $inst_kicad)    \
         "ARDUINO"    "Arduino IDE — serial-safe AppImage       $_arduino"  $(_chk $inst_arduino)  \
         "FROG"       "Frog OCR — text from images (Flatpak)    $_frog"     $(_chk $inst_frog)     \
-        "CONKY"      "Conky — desktop system monitor (apt)     $_conky"    $(_chk $inst_conky)    \
+        "CONKY"      "$conky_label"                                         "$conky_default"       \
         "GUFW"       "gufw — firewall GUI (apt)                $_gufw"     $(_chk $inst_gufw)     \
         3>&1 1>&2 2>&3) || return
 
@@ -1669,6 +1721,10 @@ install_arduino_appimage() {
 }
 
 install_conky() {
+    if $IS_HEADLESS; then
+        warn "Headless environment detected — skipping Conky (requires a display server)."
+        return
+    fi
     log "Installing Conky + default config…"
     apt_install conky-all
     local CONKY_CONF="$HOME/.config/conky/conky.conf"
@@ -1873,6 +1929,18 @@ setup_agent_system() {
 install_drivers() {
     hdr "Drivers & Hardware"
 
+    # Re-read hardware flags from disk — detect_hardware() may have run in a
+    # different process context (subshell) and bash variables don't cross that boundary
+    local HW_FLAGS="/tmp/itechniqs-hw-flags"
+    if [[ -f "$HW_FLAGS" ]]; then
+        # shellcheck source=/dev/null
+        source "$HW_FLAGS"
+        log "Hardware flags loaded: AMD=$HAS_AMD NVIDIA=$HAS_NVIDIA INTEL=$HAS_INTEL_GPU"
+    else
+        warn "Hardware flags file missing — re-running hardware detection…"
+        detect_hardware
+    fi
+
     if $IS_VM; then
         warn "Virtual machine detected — GPU driver installation skipped."
         warn "VM guest tools (open-vm-tools / virtualbox-guest-utils) handle display in a VM."
@@ -1897,8 +1965,12 @@ install_drivers() {
     if $HAS_NVIDIA; then
         install_nvidia_driver
     elif $HAS_AMD; then
-        log "AMD GPU — AMDGPU is built into the kernel. Installing firmware extras…"
-        apt_install firmware-amd-graphics 2>/dev/null || apt_install linux-firmware
+        log "AMD GPU detected — AMDGPU driver is built into the kernel."
+        log "Installing AMD firmware extras from linux-firmware…"
+        apt_install linux-firmware
+        # amdgpu extra firmware (Ubuntu package — covers OLAND, Fiji, Polaris etc.)
+        apt_install firmware-amd-graphics 2>/dev/null \
+            || log "firmware-amd-graphics not available on this distro — linux-firmware covers it."
         ok "AMD GPU firmware updated."
     elif $HAS_INTEL_GPU; then
         log "Intel GPU — installing Intel media VA drivers…"
@@ -1960,6 +2032,13 @@ install_health_daemon() {
 # =============================================================================
 
 set -euo pipefail
+
+# Suppress X11 connection attempts — this script runs as root (cron or sudo)
+# and has no display session. Without this, fwupdmgr and other GTK-linked
+# tools spam "X11 connection rejected" errors to stdout.
+unset DISPLAY
+unset XAUTHORITY
+export GDK_BACKEND=broadway 2>/dev/null || true
 
 REPORT_DIR="/var/log/itechniqs-reports"
 DATE=$(date '+%Y-%m-%d_%H-%M')
@@ -2089,7 +2168,7 @@ AUTH_FAIL=${AUTH_FAIL:-0}
 
 # ── 6. DRIVER STATUS ──────────────────────────────────────────────
 hdr "DRIVER STATUS"
-if lspci | grep -qi "nvidia"; then
+if sudo lspci 2>/dev/null | grep -qi "nvidia"; then
     if command -v nvidia-smi &>/dev/null; then
         DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null || echo "unknown")
         GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo "unknown")
@@ -2231,27 +2310,36 @@ install_media_system_tools() {
     _nala=$(      ver_nala)
     _inxi=$(      ver_inxi)
 
-    # Build menu — flag items that won't work in a VM
+    # Build menu — flag items that won't work in a VM or headless environment
     local kodi_label="Kodi — media centre (PPA)               $_kodi"
-    $IS_VM && kodi_label="Kodi — NOTE: no GPU accel in VM, may stutter  $_kodi"
+    $IS_VM      && kodi_label="Kodi — NOTE: no GPU accel in VM, may stutter  $_kodi"
+    $IS_HEADLESS && kodi_label="Kodi — SKIPPED: headless environment  $_kodi"
 
-    # gnome-tweaks only makes sense on GNOME
+    # gnome-tweaks only makes sense on GNOME desktop, not headless
     local tweaks_label tweaks_default="ON"
     local DESKTOP_ENV="${XDG_CURRENT_DESKTOP:-unknown}"
-    if echo "$DESKTOP_ENV" | grep -qi "gnome"; then
+    if $IS_HEADLESS; then
+        tweaks_label="GNOME Tweaks — SKIPPED: headless environment"
+        tweaks_default="OFF"
+    elif echo "$DESKTOP_ENV" | grep -qi "gnome"; then
         tweaks_label="GNOME Tweaks — fonts, extensions (apt)  $_tweaks"
     else
         tweaks_label="GNOME Tweaks — SKIPPED: not GNOME ($DESKTOP_ENV)"
         tweaks_default="OFF"
     fi
 
+    # Stremio is a media player — pointless headless
+    local stremio_label="Stremio — streaming aggregator (AppImg) $_stremio"
+    local stremio_default="ON"
+    $IS_HEADLESS && stremio_label="Stremio — SKIPPED: headless environment" && stremio_default="OFF"
+
     local CHOICES
     CHOICES=$(whiptail --checklist \
-        "Select media & system tools to install:" 26 72 8 \
+        "Select media & system tools to install:" 28 72 8 \
         "RESTRICTED"  "ubuntu-restricted-extras (codecs, fonts) $_restricted" ON  \
         "VLC"         "VLC media player (apt)                  $_vlc"         ON  \
         "KODI"        "$kodi_label"                                            ON  \
-        "STREMIO"     "Stremio — streaming aggregator (AppImg) $_stremio"     ON  \
+        "STREMIO"     "$stremio_label"                                         "$stremio_default" \
         "TIMESHIFT"   "Timeshift — system snapshots, RSYNC     $_timeshift"   ON  \
         "TWEAKS"      "$tweaks_label"                                          "$tweaks_default" \
         "NALA"        "Nala — prettier apt frontend (apt)      $_nala"        ON  \
@@ -2414,6 +2502,10 @@ TIMESHIFTEOF
 }
 
 install_gnome_tweaks() {
+    if $IS_HEADLESS; then
+        skip_incompatible "GNOME Tweaks" "headless environment — no display server"
+        return
+    fi
     local DESKTOP_ENV="${XDG_CURRENT_DESKTOP:-unknown}"
     if ! echo "$DESKTOP_ENV" | grep -qi "gnome"; then
         skip_incompatible "GNOME Tweaks" "your desktop is '$DESKTOP_ENV', not GNOME — this tool would do nothing"
@@ -2489,25 +2581,24 @@ esac
 # 1. Write to alert log (always)
 echo "[$TIMESTAMP] [$CATEGORY] $TITLE — $MESSAGE" | tee -a "$ALERT_LOG"
 
-# 2. Desktop notification (if a display session is available)
-# Find the active user's display and DBUS session
-DISPLAY_USER=$(who | grep -v "(:0)" | awk '{print $1}' | head -1 || echo "")
-[[ -z "$DISPLAY_USER" ]] && DISPLAY_USER=$(logname 2>/dev/null || echo "")
-
-if [[ -n "$DISPLAY_USER" ]]; then
-    local DBUS_ADDR
-    DBUS_ADDR=$(sudo -u "$DISPLAY_USER" \
-        bash -c 'ls /run/user/$(id -u)/bus 2>/dev/null | head -1' 2>/dev/null \
-        || echo "")
-    if [[ -n "$DBUS_ADDR" ]]; then
-        sudo -u "$DISPLAY_USER" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u $DISPLAY_USER)/bus" \
-            notify-send \
-                --urgency="$URGENCY" \
-                --app-name="iTechniqs Security" \
-                --icon="security-high" \
-                "[$CATEGORY] $TITLE" \
-                "$MESSAGE" 2>/dev/null || true
+# 2. Desktop notification (only if a graphical session is actually running)
+# Skip entirely on headless/SSH-only systems to avoid X11 connection errors
+if systemctl is-active --quiet graphical.target 2>/dev/null; then
+    DISPLAY_USER=$(who | grep "(:0)" | awk '{print $1}' | head -1 || echo "")
+    if [[ -n "$DISPLAY_USER" ]]; then
+        DBUS_ADDR=$(sudo -u "$DISPLAY_USER" \
+            bash -c 'ls /run/user/$(id -u)/bus 2>/dev/null | head -1' 2>/dev/null \
+            || echo "")
+        if [[ -n "$DBUS_ADDR" ]]; then
+            sudo -u "$DISPLAY_USER" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u $DISPLAY_USER)/bus" \
+                notify-send \
+                    --urgency="$URGENCY" \
+                    --app-name="iTechniqs Security" \
+                    --icon="security-high" \
+                    "[$CATEGORY] $TITLE" \
+                    "$MESSAGE" 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -2884,7 +2975,7 @@ main() {
     check_not_root
     detect_distro
     detect_hardware
-    apply_whiptail_theme
+    $IS_HEADLESS || apply_whiptail_theme
     ensure_whiptail
 
     # ── Auto boot sequence: runs on first launch or after logged errors ────────

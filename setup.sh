@@ -473,6 +473,12 @@ detect_hardware() {
     # Ensure pciutils is available — lspci is needed for GPU detection.
     # This must be installed here because detect_hardware runs before
     # install_essentials in the boot sequence.
+       # In run_boot_sequence():
+       if echo $DISPLAY | grep -q "^:" || [[ -n "$DISPLAY" ]]; then
+       ok "X11 detected: $DISPLAY"
+       else
+           warn "No X11 display found — ensure you're NOT running Wayland"
+       fi
     if [[ -f /etc/gdm3/custom.conf ]]; then
     sudo sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/custom.conf
     ok "GNOME Wayland disabled — X11-only sessions active."
@@ -737,6 +743,9 @@ EOF
     # Disable screen blank for dev sessions (desktop only, skip if headless)
     if ! $IS_HEADLESS && cmd_exists gsettings; then
         gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+        # X11-specific GNOME tweaks
+        gsettings set org.gnome.desktop.wm.preferences focus-mode 'click'  # click-to-focus
+        gsettings set org.gnome.mutter enable-experimental-features "[]"  # disable experimental Wayland features
         ok "GNOME screen blank disabled."
     fi
 

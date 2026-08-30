@@ -473,6 +473,10 @@ detect_hardware() {
     # Ensure pciutils is available — lspci is needed for GPU detection.
     # This must be installed here because detect_hardware runs before
     # install_essentials in the boot sequence.
+    if [[ -f /etc/gdm3/custom.conf ]]; then
+    sudo sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/custom.conf
+    ok "GNOME Wayland disabled — X11-only sessions active."
+    fi
     if ! command -v lspci &>/dev/null; then
         log "pciutils not found — installing silently (required for GPU detection)…"
         sudo apt-get install -y -qq pciutils >> "$LOG_FILE" 2>&1 || true
